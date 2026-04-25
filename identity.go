@@ -69,7 +69,9 @@ func (s *IdentityStore) Save() error {
 		return fmt.Errorf("could not serialize identities: %w", err)
 	}
 
-	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
+	// Use 0600 instead of 0644 — identities file may contain sensitive info
+	// (e.g. signing key references), so restrict read access to owner only.
+	if err := os.WriteFile(s.filePath, data, 0600); err != nil {
 		return fmt.Errorf("could not write identity store: %w", err)
 	}
 
@@ -109,10 +111,4 @@ func (s *IdentityStore) FindByID(id string) (*Identity, error) {
 }
 
 // IDs returns a slice of all identity IDs (used for shell completion)
-func (s *IdentityStore) IDs() []string {
-	ids := make([]string, len(s.Identities))
-	for i, identity := range s.Identities {
-		ids[i] = identity.ID
-	}
-	return ids
-}
+func (s *Iden
