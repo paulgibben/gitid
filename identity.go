@@ -1,287 +1,118 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
-	"os/exec"
-	"regexp"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
-var nicknameCache = make(map[string]string)
-
-func encodeEmail(email string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(email, "@", "_at_"), ".", "_dot_")
+// Identity represents a git user identity with name, email, and optional signing key
+type Identity struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	SigningKey string `json:"signing_key,omitempty"`
 }
 
-func setNickname(email, nickname string) error {
-	section := encodeEmail(email)
-	nicknameCmd := fmt.Sprintf("identity.%s.nickname", section)
-	err := exec.Command("git", "config", "--global", nicknameCmd, nickname).Run()
-	if err == nil {
-		// Update cache
-		nicknameCache[email] = nickname
-	}
-	return err
+// IdentityStore manages the collection of saved identities
+type IdentityStore struct {
+	Identities []Identity `json:"identities"`
+	filePath   string
 }
 
-func getNickname(email string) string {
-	// Check cache first
-	if cached, exists := nicknameCache[email]; exists {
-		return cached
-	}
-
-	section := encodeEmail(email)
-	nicknameCmd := fmt.Sprintf("identity.%s.nickname", section)
-	out, err := exec.Command("git", "config", "--global", nicknameCmd).Output()
+// getStorePath returns the path to the identity store file
+func getStorePath() (string, error) {
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		nicknameCache[email] = ""
-		return ""
+		return "", fmt.Errorf("could not determine home directory: %w", err)
 	}
-	nickname := strings.TrimSpace(string(out))
-	nicknameCache[email] = nickname
-	return nickname
+	return filepath.Join(homeDir, ".gitid", "identities.json"), nil
 }
 
-func hasNickname(email string) bool {
-	return getNickname(email) != ""
+// LoadStore reads the identity store from disk, creating it if it doesn't exist
+func LoadStore() (*IdentityStore, error) {
+	path, err := getStorePath()
+	if err != nil {
+		return nil, err
+	}
+
+	store := &IdentityStore{filePath: path}
+
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// Return empty store if file doesn't exist yet
+		return store, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("could not read identity store: %w", err)
+	}
+
+	if err := json.Unmarshal(data, store); err != nil {
+		return nil, fmt.Errorf("could not parse identity store: %w", err)
+	}
+
+	return store, nil
 }
 
-func getIdentityDisplay(identity Identity) string {
-	if identity.Nickname != "" {
-		return fmt.Sprintf("%s (%s <%s>)", identity.Nickname, identity.Name, identity.Email)
-	}
-	return fmt.Sprintf("%s <%s>", identity.Name, identity.Email)
-}
-
-func getAllIdentities() []Identity {
-	out, _ := exec.Command("git", "config", "--global", "--get-regexp", "^identity\\.").Output()
-	var identities []Identity
-	re := regexp.MustCompile(`identity\.(.+)\.name\s(.+)`)
-
-	for _, line := range strings.Split(string(out), "\n") {
-		matches := re.FindStringSubmatch(line)
-		if len(matches) > 2 {
-			section := matches[1]
-			name := matches[2]
-			emailCmd := fmt.Sprintf("identity.%s.email", section)
-			emailOut, _ := exec.Command("git", "config", "--global", emailCmd).Output()
-			email := strings.TrimSpace(string(emailOut))
-
-			identity := Identity{
-				Name:     name,
-				Email:    email,
-				Nickname: getNickname(email),
-			}
-			identities = append(identities, identity)
-		}
-	}
-	return identities
-}
-
-func findIdentityByIdentifier(identifier string) (Identity, bool) {
-	identities := getAllIdentities()
-
-	for _, identity := range identities {
-		if identity.Nickname == identifier {
-			return identity, true
-		}
+// Save writes the identity store to disk
+func (s *IdentityStore) Save() error {
+	dir := filepath.Dir(s.filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("could not create config directory: %w", err)
 	}
 
-	for _, identity := range identities {
-		if identity.Email == identifier {
-			return identity, true
-		}
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Errorf("could not serialize identities: %w", err)
 	}
 
-	for _, identity := range identities {
-		if identity.Name == identifier {
-			return identity, true
-		}
-	}
-
-	for _, identity := range identities {
-		if strings.Contains(identity.Email, identifier) {
-			return identity, true
-		}
-	}
-
-	for _, identity := range identities {
-		if strings.Contains(identity.Name, identifier) {
-			return identity, true
-		}
-	}
-
-	return Identity{}, false
-}
-
-func addIdentity(name, email, nickname string) error {
-	section := encodeEmail(email)
-
-	nameCmd := fmt.Sprintf("identity.%s.name", section)
-	emailCmd := fmt.Sprintf("identity.%s.email", section)
-
-	if err := exec.Command("git", "config", "--global", nameCmd, name).Run(); err != nil {
-		return fmt.Errorf("error setting name: %w", err)
-	}
-	if err := exec.Command("git", "config", "--global", emailCmd, email).Run(); err != nil {
-		return fmt.Errorf("error setting email: %w", err)
-	}
-
-	if nickname != "" {
-		if err := setNickname(email, nickname); err != nil {
-			return fmt.Errorf("error setting nickname: %w", err)
-		}
+	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
+		return fmt.Errorf("could not write identity store: %w", err)
 	}
 
 	return nil
 }
 
-func switchIdentity(name, email string) {
-	if err := exec.Command("git", "config", "--global", "user.name", name).Run(); err != nil {
-		fmt.Printf("Error setting user name: %v\n", err)
-		return
-	}
-	if err := exec.Command("git", "config", "--global", "user.email", email).Run(); err != nil {
-		fmt.Printf("Error setting user email: %v\n", err)
-		return
-	}
-}
-
-func switchIdentityByIdentifier(identifier string) error {
-	identity, found := findIdentityByIdentifier(identifier)
-	if !found {
-		return fmt.Errorf("identity not found: %s", identifier)
-	}
-
-	switchIdentity(identity.Name, identity.Email)
-	return nil
-}
-
-func updateIdentity(oldEmail, newName, newEmail, newNickname string) error {
-	if oldEmail != newEmail {
-		if err := deleteIdentity(oldEmail); err != nil {
-			return fmt.Errorf("error removing old identity: %w", err)
+// Add inserts a new identity into the store, returning an error if the ID already exists
+func (s *IdentityStore) Add(identity Identity) error {
+	for _, existing := range s.Identities {
+		if strings.EqualFold(existing.ID, identity.ID) {
+			return fmt.Errorf("identity with id %q already exists", identity.ID)
 		}
 	}
-
-	if err := addIdentity(newName, newEmail, newNickname); err != nil {
-		return fmt.Errorf("error adding updated identity: %w", err)
-	}
-
+	s.Identities = append(s.Identities, identity)
 	return nil
 }
 
-func deleteIdentity(email string) error {
-	section := encodeEmail(email)
-
-	nameCmd := fmt.Sprintf("identity.%s.name", section)
-	emailCmd := fmt.Sprintf("identity.%s.email", section)
-	nicknameCmd := fmt.Sprintf("identity.%s.nickname", section)
-
-	if err := exec.Command("git", "config", "--global", "--unset", nameCmd).Run(); err != nil {
-		return fmt.Errorf("error removing name: %w", err)
-	}
-	if err := exec.Command("git", "config", "--global", "--unset", emailCmd).Run(); err != nil {
-		return fmt.Errorf("error removing email: %w", err)
-	}
-	exec.Command("git", "config", "--global", "--unset", nicknameCmd).Run()
-
-	// Clear from cache
-	delete(nicknameCache, email)
-
-	return nil
-}
-
-func setLocalIdentity(name, email string) error {
-	// Check if we're inside a git repository
-	if err := exec.Command("git", "rev-parse", "--is-inside-work-tree").Run(); err != nil {
-		return fmt.Errorf("not inside a git repository: cannot set local identity")
-	}
-
-	if err := exec.Command("git", "config", "--local", "user.name", name).Run(); err != nil {
-		return fmt.Errorf("error setting local user name: %w", err)
-	}
-	if err := exec.Command("git", "config", "--local", "user.email", email).Run(); err != nil {
-		return fmt.Errorf("error setting local user email: %w", err)
-	}
-	return nil
-}
-
-func setLocalIdentityByIdentifier(identifier string) error {
-	identity, found := findIdentityByIdentifier(identifier)
-	if !found {
-		return fmt.Errorf("identity not found: %s", identifier)
-	}
-
-	return setLocalIdentity(identity.Name, identity.Email)
-}
-
-func addLocalIdentity(name, email, nickname string) error {
-	// First add to global identities if not exists
-	section := encodeEmail(email)
-	nameCmd := fmt.Sprintf("identity.%s.name", section)
-
-	// Check if identity already exists globally
-	_, err := exec.Command("git", "config", "--global", nameCmd).Output()
-	if err != nil {
-		// Identity doesn't exist globally, add it
-		if err := addIdentity(name, email, nickname); err != nil {
-			return fmt.Errorf("error adding identity globally: %w", err)
+// Remove deletes an identity by ID, returning an error if not found
+func (s *IdentityStore) Remove(id string) error {
+	for i, identity := range s.Identities {
+		if strings.EqualFold(identity.ID, id) {
+			s.Identities = append(s.Identities[:i], s.Identities[i+1:]...)
+			return nil
 		}
 	}
-
-	// Set as local identity
-	return setLocalIdentity(name, email)
+	return fmt.Errorf("identity %q not found", id)
 }
 
-func getCurrentLocalIdentity() (string, string, error) {
-	nameOut, err := exec.Command("git", "config", "--local", "user.name").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("no local git identity configured")
+// FindByID looks up an identity by its ID
+func (s *IdentityStore) FindByID(id string) (*Identity, error) {
+	for i, identity := range s.Identities {
+		if strings.EqualFold(identity.ID, id) {
+			return &s.Identities[i], nil
+		}
 	}
-	emailOut, err := exec.Command("git", "config", "--local", "user.email").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("no local git identity configured")
-	}
-
-	name := strings.TrimSpace(string(nameOut))
-	email := strings.TrimSpace(string(emailOut))
-	return name, email, nil
+	return nil, fmt.Errorf("identity %q not found", id)
 }
 
-func isInGitRepository() bool {
-	err := exec.Command("git", "rev-parse", "--is-inside-work-tree").Run()
-	return err == nil
-}
-
-func unsetLocalIdentity() error {
-	if !isInGitRepository() {
-		return fmt.Errorf("not in a git repository")
+// IDs returns a slice of all identity IDs (used for shell completion)
+func (s *IdentityStore) IDs() []string {
+	ids := make([]string, len(s.Identities))
+	for i, identity := range s.Identities {
+		ids[i] = identity.ID
 	}
-	if err := exec.Command("git", "config", "--local", "--unset", "user.name").Run(); err != nil {
-		return err
-	}
-	return exec.Command("git", "config", "--local", "--unset", "user.email").Run()
-}
-
-func hasLocalIdentity() bool {
-	if !isInGitRepository() {
-		return false
-	}
-
-	// Check if local config actually has user.name and user.email set
-	// (not just falling back to global)
-	nameOut, err := exec.Command("git", "config", "--local", "user.name").Output()
-	if err != nil {
-		return false
-	}
-	emailOut, err := exec.Command("git", "config", "--local", "user.email").Output()
-	if err != nil {
-		return false
-	}
-
-	name := strings.TrimSpace(string(nameOut))
-	email := strings.TrimSpace(string(emailOut))
-
-	return name != "" && email != ""
+	return ids
 }
