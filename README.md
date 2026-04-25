@@ -127,6 +127,6 @@ gitid repo use <nickname|name|email>
 # Add new identity and set as local for current repository
 gitid repo add "Full Name" "email@domain.com" [nickname]
 
-# Remove local identity override (revert to global)
+# Remove local identity override (fall back to global)
 gitid repo remove
 ```
