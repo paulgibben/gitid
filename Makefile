@@ -16,7 +16,8 @@ CGO_ENABLED=0
 
 # Supported platforms
 PLATFORMS=linux darwin windows
-ARCHITECTURES=amd64 arm64
+# Note: removed arm64 for now since I only build/test on amd64 machines
+ARCHITECTURES=amd64
 
 # Output directories
 RELEASE_DIR=release
