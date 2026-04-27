@@ -1,4 +1,4 @@
-module github.com/nathabonfim59/gitid
+module github.com/myfork/gitid
 
 go 1.23.4
 
