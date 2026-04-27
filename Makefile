@@ -43,6 +43,10 @@ clean:
 test:
 	$(GOTEST) -v ./...
 
+# run a quick test without verbose output (useful for repeated local checks)
+test-quiet:
+	$(GOTEST) ./...
+
 release: clean
 	mkdir -p $(RELEASE_DIR) $(BUILD_DIR)
 	# Build for each platform/architecture
