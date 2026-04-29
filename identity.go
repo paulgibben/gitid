@@ -23,8 +23,13 @@ type IdentityStore struct {
 	filePath   string
 }
 
-// getStorePath returns the path to the identity store file
+// getStorePath returns the path to the identity store file.
+// The store location can be overridden by setting the GITID_STORE env variable,
+// which is handy when managing separate stores for work and personal machines.
 func getStorePath() (string, error) {
+	if override := os.Getenv("GITID_STORE"); override != "" {
+		return override, nil
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("could not determine home directory: %w", err)
@@ -105,10 +110,3 @@ func (s *IdentityStore) FindByID(id string) (*Identity, error) {
 	for i, identity := range s.Identities {
 		if strings.EqualFold(identity.ID, id) {
 			return &s.Identities[i], nil
-		}
-	}
-	return nil, fmt.Errorf("identity %q not found", id)
-}
-
-// IDs returns a slice of all identity IDs (used for shell completion)
-func (s *Iden
