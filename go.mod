@@ -28,3 +28,6 @@ require (
 	golang.org/x/sys v0.27.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
 )
+
+// Personal fork of nathabonfim59/gitid - using for local experimentation
+// Upstream: https://github.com/nathabonfim59/gitid
