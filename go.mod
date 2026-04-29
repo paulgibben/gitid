@@ -31,3 +31,7 @@ require (
 
 // Personal fork of nathabonfim59/gitid - using for local experimentation
 // Upstream: https://github.com/nathabonfim59/gitid
+//
+// Notes:
+//   - Tracking upstream; periodically sync with: git fetch upstream && git merge upstream/main
+//   - Experimenting with additional profile switching shortcuts in the TUI
